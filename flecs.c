@@ -41991,6 +41991,8 @@ int flecs_expr_ser_primitive(
     ecs_strbuf_t *str,
     bool is_expr);
 
+void flecs_rtt_dtor(void *ptr, int32_t count, const ecs_type_info_t *type_info); 
+
 #endif
 
 #endif
@@ -49330,14 +49332,19 @@ int flecs_init_type(
 
     EcsType *meta_type = ecs_ensure(world, type, EcsType);
     if (meta_type->kind == 0) {
+        ecs_type_info_t *ti = flecs_type_info_ensure(world, type);
         meta_type->existing = ecs_has(world, type, EcsComponent);
+
+        if(!meta_type->existing){
+            ti->hooks.dtor = flecs_rtt_dtor;
+        }
 
         /* Ensure that component has a default constructor, to prevent crashing
          * serializers on uninitialized values. */
-        ecs_type_info_t *ti = flecs_type_info_ensure(world, type);
         if (!ti->hooks.ctor) {
             ti->hooks.ctor = flecs_default_ctor;
         }
+
     } else {
         if (meta_type->kind != kind) {
             ecs_err("type '%s' reregistered as '%s' (was '%s')", 
@@ -50537,14 +50544,15 @@ void FlecsMetaImport(
 
 #ifdef FLECS_META
 
-int flecs_meta_rtt_walk_dtor_opcodes(const ecs_world_t *ecs, void *ptr, ecs_meta_type_op_t *ops, int32_t op_count) {
+static int flecs_meta_rtt_walk_dtor_opcodes(const ecs_world_t *world, void *ptr, ecs_meta_type_op_t *ops,
+                                            int32_t op_count) {
   for (int i = 0; i < op_count; i++) {
     ecs_meta_type_op_t *op = &ops[i];
     switch (op->kind) {
       case EcsOpPush: {
         int used = 0;
         for (int c = 0; c < op->count; c++) {
-          used = flecs_meta_rtt_walk_dtor_opcodes(ecs, ECS_OFFSET(ptr, op->offset + c * op->size), &ops[i + 1],
+          used = flecs_meta_rtt_walk_dtor_opcodes(world, ECS_OFFSET(ptr, op->offset + c * op->size), &ops[i + 1],
                                                   op_count - i - 1);
           assert(used != -1 && "unmatched push/pop");
         }
@@ -50555,7 +50563,7 @@ int flecs_meta_rtt_walk_dtor_opcodes(const ecs_world_t *ecs, void *ptr, ecs_meta
         return i;
       }
       case EcsOpOpaque: {
-        const ecs_type_info_t *ti = ecs_get_type_info(ecs, op->type);
+        const ecs_type_info_t *ti = ecs_get_type_info(world, op->type);
         ecs_assert(ti != NULL, ECS_INTERNAL_ERROR, NULL);
 
         if (ti->hooks.dtor) {
@@ -50563,13 +50571,13 @@ int flecs_meta_rtt_walk_dtor_opcodes(const ecs_world_t *ecs, void *ptr, ecs_meta
         }
       } break;
       case EcsOpVector: {
-        const EcsVector *vt = ecs_get(ecs, op->type, EcsVector);
+        const EcsVector *vt = ecs_get(world, op->type, EcsVector);
         ecs_assert(vt != NULL, ECS_INTERNAL_ERROR, NULL);
 
         ecs_vec_t *vec = (ecs_vec_t *) ECS_OFFSET(ptr, op->offset);
         int32_t count = ecs_vec_count(vec);
         void *array = ecs_vec_first(vec);
-        const ecs_type_info_t *ti = ecs_get_type_info(ecs, vt->type);
+        const ecs_type_info_t *ti = ecs_get_type_info(world, vt->type);
         ecs_assert(ti != NULL, ECS_INTERNAL_ERROR, NULL);
 
         if (count && ti->hooks.dtor) {
@@ -50583,12 +50591,49 @@ int flecs_meta_rtt_walk_dtor_opcodes(const ecs_world_t *ecs, void *ptr, ecs_meta
         ecs_os_free(*ppstring);
         *ppstring = NULL;
       } break;
+      case EcsOpArray:
+      case EcsOpScope:
+      case EcsOpEnum:
+      case EcsOpBitmask:
+      case EcsOpPrimitive:
+      case EcsOpBool:
+      case EcsOpChar:
+      case EcsOpByte:
+      case EcsOpU8:
+      case EcsOpU16:
+      case EcsOpU32:
+      case EcsOpU64:
+      case EcsOpI8:
+      case EcsOpI16:
+      case EcsOpI32:
+      case EcsOpI64:
+      case EcsOpF32:
+      case EcsOpF64:
+      case EcsOpUPtr:
+      case EcsOpIPtr:
+      case EcsOpEntity:
+      case EcsOpId:
       default: {
       } break;
     }
   }
   return -1;
 }
+
+void flecs_rtt_dtor(void *ptr, int32_t count, const ecs_type_info_t *type_info) {
+  const ecs_world_t *world = type_info->world;
+  const EcsTypeSerializer *ser = ecs_get(world, type_info->component, EcsTypeSerializer);
+  ecs_assert(ser != NULL, ECS_INTERNAL_ERROR, NULL);
+
+  ecs_meta_type_op_t *ops = ecs_vec_first_t(&ser->ops, ecs_meta_type_op_t);
+  int32_t op_count = ecs_vec_count(&ser->ops);
+
+  for (int i = 0; i < count; i++) {
+    flecs_meta_rtt_walk_dtor_opcodes(world, ptr, ops, op_count);
+    ptr = ECS_OFFSET(ptr, type_info->size);
+  }
+}
+
 #endif
 /**
  * @file addons/meta/serialized.c

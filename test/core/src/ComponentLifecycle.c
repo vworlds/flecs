@@ -2394,6 +2394,7 @@ void ComponentLifecycle_ctor_move_dtor_after_resize(void) {
 
 static int component_user_ctx = 0;
 static int component_binding_ctx = 0;
+static int component_lifecycle_ctx = 0;
 
 static void component_ctx_free(void *ctx) {
     test_assert(ctx == &component_user_ctx);
@@ -2423,6 +2424,21 @@ void ComponentLifecycle_binding_ctx_free(void) {
     ecs_set_hooks(world, Position, {
         .binding_ctx = &component_user_ctx,
         .binding_ctx_free = component_ctx_free
+    });
+
+    ecs_fini(world);
+
+    test_int(1, component_user_ctx);
+}
+
+void ComponentLifecycle_lifecycle_ctx_free(void) {
+    ecs_world_t *world = ecs_mini();
+
+    ECS_COMPONENT(world, Position);
+
+    ecs_set_hooks(world, Position, {
+        .lifecycle_ctx = &component_user_ctx,
+        .lifecycle_ctx_free = component_ctx_free
     });
 
     ecs_fini(world);
@@ -2466,11 +2482,30 @@ void ComponentLifecycle_binding_ctx_free_after_delete_component(void) {
     ecs_fini(world);
 }
 
+void ComponentLifecycle_lifecycle_ctx_free_after_delete_component(void) {
+    ecs_world_t *world = ecs_mini();
+
+    ECS_COMPONENT(world, Position);
+
+    ecs_set_hooks(world, Position, {
+        .lifecycle_ctx = &component_user_ctx,
+        .lifecycle_ctx_free = component_ctx_free
+    });
+
+    ecs_remove_pair(world, ecs_id(Position), EcsOnDelete, EcsPanic);
+    ecs_delete(world, ecs_id(Position));
+
+    test_int(1, component_user_ctx);
+
+    ecs_fini(world);
+}
+
 static void test_hook_ctx(ecs_iter_t *it) {
     test_assert(it->ctx == &component_user_ctx);
     test_assert(it->callback_ctx == &component_binding_ctx);
     component_user_ctx ++;
     component_binding_ctx ++;
+    component_lifecycle_ctx ++;
 }
 
 void ComponentLifecycle_on_add_ctx(void) {
@@ -2481,17 +2516,20 @@ void ComponentLifecycle_on_add_ctx(void) {
     ecs_set_hooks(world, Position, {
         .on_add = test_hook_ctx,
         .ctx = &component_user_ctx,
-        .binding_ctx = &component_binding_ctx
+        .binding_ctx = &component_binding_ctx,
+        .lifecycle_ctx = &component_lifecycle_ctx
     });
 
     ecs_new_w(world, Position);
     test_int(1, component_user_ctx);
     test_int(1, component_binding_ctx);
+    test_int(1, component_lifecycle_ctx);
 
     ecs_fini(world);
 
     test_int(1, component_user_ctx);
     test_int(1, component_binding_ctx);
+    test_int(1, component_lifecycle_ctx);
 }
 
 void ComponentLifecycle_on_remove_ctx(void) {
@@ -2502,21 +2540,25 @@ void ComponentLifecycle_on_remove_ctx(void) {
     ecs_set_hooks(world, Position, {
         .on_remove = test_hook_ctx,
         .ctx = &component_user_ctx,
-        .binding_ctx = &component_binding_ctx
+        .binding_ctx = &component_binding_ctx,
+        .lifecycle_ctx = &component_lifecycle_ctx
     });
 
     ecs_entity_t e = ecs_new_w(world, Position);
     test_int(0, component_user_ctx);
     test_int(0, component_binding_ctx);
+    test_int(0, component_lifecycle_ctx);
 
     ecs_remove(world, e, Position);
     test_int(1, component_user_ctx);
     test_int(1, component_binding_ctx);
+    test_int(1, component_lifecycle_ctx);
 
     ecs_fini(world);
 
     test_int(1, component_user_ctx);
     test_int(1, component_binding_ctx);
+    test_int(1, component_lifecycle_ctx);
 }
 
 void ComponentLifecycle_on_set_ctx(void) {
@@ -2527,21 +2569,25 @@ void ComponentLifecycle_on_set_ctx(void) {
     ecs_set_hooks(world, Position, {
         .on_set = test_hook_ctx,
         .ctx = &component_user_ctx,
-        .binding_ctx = &component_binding_ctx
+        .binding_ctx = &component_binding_ctx,
+        .lifecycle_ctx = &component_lifecycle_ctx
     });
 
     ecs_entity_t e = ecs_new_w(world, Position);
     test_int(0, component_user_ctx);
     test_int(0, component_binding_ctx);
+    test_int(0, component_lifecycle_ctx);
 
     ecs_set(world, e, Position, {10, 20});
     test_int(1, component_user_ctx);
     test_int(1, component_binding_ctx);
+    test_int(1, component_lifecycle_ctx);
 
     ecs_fini(world);
 
     test_int(1, component_user_ctx);
     test_int(1, component_binding_ctx);
+    test_int(1, component_lifecycle_ctx);
 }
 
 static int test_on_event_invoked = 0;

@@ -1130,7 +1130,7 @@ void flecs_default_move_ctor_w_dtor(void *dst_ptr, void *src_ptr,
 }
 
 static
-void flecs_default_move(void *dst_ptr, void *src_ptr,
+void flecs_default_move_dtor(void *dst_ptr, void *src_ptr,
     int32_t count, const ecs_type_info_t *ti)
 {
     const ecs_type_hooks_t *cl = &ti->hooks;
@@ -1267,7 +1267,7 @@ void ecs_set_hooks_id(
             if (h->dtor) {
                 ti->hooks.move_dtor = flecs_default_move_w_dtor;
             } else {
-                ti->hooks.move_dtor = flecs_default_move;
+                ti->hooks.move_dtor = flecs_default_move_dtor;
             }
         } else {
             if (h->dtor) {

@@ -105,11 +105,11 @@ static void flecs_meta_rtt_free_lifecycle_ctx(void *ctx) {
 
 static ecs_meta_rtt_ctx_t *flecs_meta_rtt_configure_hooks(ecs_world_t *world, const ecs_type_info_t *ti, bool ctor,
                                                           bool dtor, bool move, bool copy) {
+  ecs_type_hooks_t hooks = ti->hooks;
+  flecs_meta_rtt_free_lifecycle_ctx(hooks.lifecycle_ctx);
+  ecs_meta_rtt_ctx_t *rtt_ctx = NULL;
   if (ctor || dtor || move || copy) {
-    ecs_type_hooks_t hooks = ti->hooks;
-    flecs_meta_rtt_free_lifecycle_ctx(hooks.lifecycle_ctx);
-
-    ecs_meta_rtt_ctx_t *rtt_ctx = ecs_os_malloc_t(ecs_meta_rtt_ctx_t);
+    rtt_ctx = ecs_os_malloc_t(ecs_meta_rtt_ctx_t);
     ecs_vec_init_t(NULL, &rtt_ctx->ctors, ecs_meta_rtt_xtor_data_t, 0);
     ecs_vec_init_t(NULL, &rtt_ctx->dtors, ecs_meta_rtt_xtor_data_t, 0);
     ecs_vec_init_t(NULL, &rtt_ctx->moves, ecs_meta_rtt_move_data_t, 0);
@@ -129,12 +129,11 @@ static ecs_meta_rtt_ctx_t *flecs_meta_rtt_configure_hooks(ecs_world_t *world, co
     if (copy) {
       hooks.copy = flecs_meta_rtt_copy;
     }
-
-    ecs_set_hooks_id(world, ti->component, &hooks);
-    return rtt_ctx;
   } else {
-    return NULL;
+    hooks.lifecycle_ctx = NULL;
   }
+  ecs_set_hooks_id(world, ti->component, &hooks);
+  return rtt_ctx;
 }
 
 void flecs_meta_rtt_init_default_hooks(ecs_iter_t *it) {
@@ -232,7 +231,6 @@ void flecs_meta_rtt_init_default_hooks(ecs_iter_t *it) {
             }
           }
         }
-
         continue;
       }
       // rtt hook not required, so potentially set a default ctor below.
@@ -279,6 +277,7 @@ void flecs_meta_rtt_init_default_hooks(ecs_iter_t *it) {
         }
         continue;
       }
+      // rtt hook not required, so potentially set a default ctor below.
     } else if (type->kind == EcsVectorType) {
       // TODO -- pending cursor primitives to manipulate vectors
     }

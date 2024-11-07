@@ -160,7 +160,7 @@ void* flecs_meta_cursor_get_write_ptr(
                 return NULL;
             }
             ecs_assert(scope->ptr != NULL, ECS_INTERNAL_ERROR, NULL);
-            return opaque->ensure_member(scope->ptr, op->name);
+            return opaque->ensure_member(scope->ptr, op->name, &scope->opaque_ctx);
         } else {
             ecs_err("invalid operation for opaque type");
             return NULL;
@@ -170,6 +170,18 @@ void* flecs_meta_cursor_get_write_ptr(
     return ECS_OFFSET(scope->ptr, size * scope->elem_cur + op->offset);
 }
 
+static
+void* flecs_meta_cursor_free_write_ptr(
+    ecs_meta_scope_t *scope) {
+
+if(scope->opaque_ctx != NULL ){
+    printf("write ptr open with %p freed\n", scope->opaque_ctx);
+    scope->opaque->ensure_commit(scope->ptr, scope->opaque_ctx);
+    scope->opaque_ctx = NULL;
+}
+
+
+}
 /* Get pointer to current field/element for reading */
 static
 const void* flecs_meta_cursor_get_read_ptr(
@@ -282,6 +294,7 @@ int ecs_meta_next(
     ecs_meta_cursor_t *cursor)
 {
     ecs_meta_scope_t *scope = flecs_meta_cursor_get_scope(cursor);
+    flecs_meta_cursor_free_write_ptr(scope);
     scope = flecs_meta_cursor_restore_scope(cursor, scope);
     ecs_meta_type_op_t *op = flecs_meta_cursor_get_op(scope);
 
@@ -342,6 +355,7 @@ int ecs_meta_member(
     }
 
     ecs_meta_scope_t *scope = flecs_meta_cursor_get_scope(cursor);
+    flecs_meta_cursor_free_write_ptr(scope);
     scope = flecs_meta_cursor_restore_scope(cursor, scope);
 
     ecs_hashmap_t *members = scope->members;
@@ -683,6 +697,7 @@ int ecs_meta_pop(
     }
 
     ecs_meta_scope_t *scope = flecs_meta_cursor_get_scope(cursor);
+    flecs_meta_cursor_free_write_ptr(scope);
     scope = flecs_meta_cursor_restore_scope(cursor, scope);
     cursor->depth --;
     if (cursor->depth < 0) {
@@ -987,6 +1002,7 @@ int ecs_meta_set_bool(
         ecs_throw(ECS_INVALID_PARAMETER, "invalid operation");
     }
 
+    flecs_meta_cursor_free_write_ptr(scope);
     return 0;
 error:
     return -1;
@@ -1049,6 +1065,7 @@ int ecs_meta_set_char(
         ecs_throw(ECS_INVALID_PARAMETER, "invalid operation");
     }
 
+    flecs_meta_cursor_free_write_ptr(scope);
     return 0;
 error:
     return -1;
@@ -1107,6 +1124,7 @@ int ecs_meta_set_int(
         ecs_throw(ECS_INVALID_PARAMETER, "invalid operation");
     }
 
+    flecs_meta_cursor_free_write_ptr(scope);
     return 0;
 error:
     return -1;
@@ -1164,6 +1182,7 @@ int ecs_meta_set_uint(
         ecs_throw(ECS_INVALID_PARAMETER, "invalid operation");
     }
 
+    flecs_meta_cursor_free_write_ptr(scope);
     return 0;
 error:
     return -1;
@@ -1230,6 +1249,7 @@ int ecs_meta_set_float(
         ecs_throw(ECS_INVALID_PARAMETER, "invalid operation");
     }
 
+    flecs_meta_cursor_free_write_ptr(scope);
     return 0;
 error:
     return -1;
@@ -1288,7 +1308,9 @@ int ecs_meta_set_value(
             ecs_os_free(type_str);
             goto error;
         }
-        return ecs_value_copy(cursor->world, value->type, ptr, value->ptr);
+        int ret = ecs_value_copy(cursor->world, value->type, ptr, value->ptr);
+        flecs_meta_cursor_free_write_ptr(scope);
+        return ret;
     }
 
 error:
@@ -1573,6 +1595,7 @@ int ecs_meta_set_string(
         break;
     }
 
+    flecs_meta_cursor_free_write_ptr(scope);
     return 0;
 error:
     return -1;
@@ -1645,6 +1668,7 @@ int ecs_meta_set_string_literal(
         break;
     }
 
+    flecs_meta_cursor_free_write_ptr(scope);
     return 0;
 error:
     return -1;
@@ -1710,6 +1734,7 @@ int ecs_meta_set_entity(
         break;
     }
 
+    flecs_meta_cursor_free_write_ptr(scope);
     return 0;
 error:
     return -1;
@@ -1773,6 +1798,7 @@ int ecs_meta_set_id(
         break;
     }
 
+    flecs_meta_cursor_free_write_ptr(scope);
     return 0;
 error:
     return -1;
@@ -1829,6 +1855,7 @@ int ecs_meta_set_null(
         break;
     }
 
+    flecs_meta_cursor_free_write_ptr(scope);
     return 0;
 error:
     return -1;

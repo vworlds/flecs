@@ -454,7 +454,14 @@ typedef struct EcsOpaque {
     /** Ensure & get element */
     void* (*ensure_member)(
         void *dst,
-        const char *member);
+        const char *member,
+        void** opaque_ctx
+        );
+
+    void (*ensure_commit)(
+        void *dst,
+        void* opaque_ctx
+        );
 
     /** Return number of elements */
     size_t (*count)(
@@ -630,6 +637,7 @@ typedef struct ecs_meta_scope_t {
     bool is_collection;                            /**< Is the scope iterating elements? */
     bool is_inline_array;                          /**< Is the scope iterating an inline array? */
     bool is_empty_scope;                           /**< Was scope populated (for collections) */
+    void* opaque_ctx;
 } ecs_meta_scope_t;
 
 /** Type that enables iterating/populating a value using reflection data. */

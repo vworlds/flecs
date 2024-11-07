@@ -143,10 +143,17 @@ struct opaque {
     }
 
     /** Ensure & get element */
-    opaque& ensure_member(void* (*func)(T *dst, const char *member)) {
+    opaque& ensure_member(void* (*func)(T *dst, const char *member, void **ctx)) {
         this->desc.type.ensure_member =
             reinterpret_cast<decltype(
                 this->desc.type.ensure_member)>(func);
+        return *this;
+    }
+
+    opaque& ensure_commit(void (*func)(T *dst, void *ctx)) {
+        this->desc.type.ensure_commit =
+            reinterpret_cast<decltype(
+                this->desc.type.ensure_commit)>(func);
         return *this;
     }
 

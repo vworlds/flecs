@@ -350,35 +350,42 @@ ecs_move_t move_dtor(ecs_type_hooks_flags_t &) {
 
 
 // Traits to check for operator<, operator>, and operator==
-
 template<typename...>
 using void_t = void;
 
-// Traits to check for operator<, operator>, and operator==
+
+// Trait to check for operator<
 template <typename T, typename = void>
 struct has_operator_less : std::false_type {};
 
+// Only enable if T has an operator< that takes T as the right-hand side (no implicit conversion)
 template <typename T>
-struct has_operator_less<T, void_t<decltype(std::declval<T>() < std::declval<T>())>> : std::true_type {};
+struct has_operator_less<T, void_t<decltype(std::declval<const T&>() < std::declval<const T&>())>> : 
+    std::is_same<decltype(std::declval<const T&>() < std::declval<const T&>()), bool> {};
 
+// Trait to check for operator>
 template <typename T, typename = void>
 struct has_operator_greater : std::false_type {};
 
+// Only enable if T has an operator> that takes T as the right-hand side (no implicit conversion)
 template <typename T>
-struct has_operator_greater<T, void_t<decltype(std::declval<T>() > std::declval<T>())>> : std::true_type {};
+struct has_operator_greater<T, void_t<decltype(std::declval<const T&>() > std::declval<const T&>())>> : 
+    std::is_same<decltype(std::declval<const T&>() > std::declval<const T&>()), bool> {};
 
+// Trait to check for operator==
 template <typename T, typename = void>
 struct has_operator_equal : std::false_type {};
 
+// Only enable if T has an operator== that takes T as the right-hand side (no implicit conversion)
 template <typename T>
-struct has_operator_equal<T, void_t<decltype(std::declval<T>() == std::declval<T>())>> : std::true_type {};
+struct has_operator_equal<T, void_t<decltype(std::declval<const T&>() == std::declval<const T&>())>> : 
+    std::is_same<decltype(std::declval<const T&>() == std::declval<const T&>()), bool> {};
 
 // 1. Compare function if `<`, `>`, are defined
-template <typename T>
-typename std::enable_if<
+template <typename T, if_t<
     has_operator_less<T>::value &&
-    has_operator_greater<T>::value, int>::type
-compare(const void *a, const void *b, const ecs_type_info_t *info) {
+    has_operator_greater<T>::value > = 0>
+int compare(const void *a, const void *b, const ecs_type_info_t *info) {
     const T& lhs = *static_cast<const T*>(a);
     const T& rhs = *static_cast<const T*>(b);
     if (lhs < rhs) return -1;
@@ -387,12 +394,11 @@ compare(const void *a, const void *b, const ecs_type_info_t *info) {
 }
 
 // 2. Compare function if `<` and `==` are defined, deducing `>`
-template <typename T>
-typename std::enable_if<
+template <typename T, if_t<
     has_operator_less<T>::value &&
     has_operator_equal<T>::value &&
-    !has_operator_greater<T>::value, int>::type
-compare(const void *a, const void *b, const ecs_type_info_t *info) {
+    !has_operator_greater<T>::value > = 0>
+int compare(const void *a, const void *b, const ecs_type_info_t *info) {
     const T& lhs = *static_cast<const T*>(a);
     const T& rhs = *static_cast<const T*>(b);
     if (lhs == rhs) return 0;
@@ -401,12 +407,11 @@ compare(const void *a, const void *b, const ecs_type_info_t *info) {
 }
 
 // 3. Compare function if `>` and `==` are defined, deducing `<`
-template <typename T>
-typename std::enable_if<
+template <typename T, if_t<    
     has_operator_greater<T>::value &&
     has_operator_equal<T>::value &&
-    !has_operator_less<T>::value, int>::type
-compare(const void *a, const void *b, const ecs_type_info_t *info) {
+    !has_operator_less<T>::value > = 0>
+int compare(const void *a, const void *b, const ecs_type_info_t *info) {
     const T& lhs = *static_cast<const T*>(a);
     const T& rhs = *static_cast<const T*>(b);
     if (lhs == rhs) return 0;
@@ -415,12 +420,11 @@ compare(const void *a, const void *b, const ecs_type_info_t *info) {
 }
 
 // 4. Compare function if only `<` is defined, deducing the rest
-template <typename T>
-typename std::enable_if<
+template <typename T, if_t<
     has_operator_less<T>::value &&
     !has_operator_greater<T>::value &&
-    !has_operator_equal<T>::value, int>::type
-compare(const void *a, const void *b, const ecs_type_info_t *info) {
+    !has_operator_equal<T>::value > = 0>
+int compare(const void *a, const void *b, const ecs_type_info_t *info) {
     const T& lhs = *static_cast<const T*>(a);
     const T& rhs = *static_cast<const T*>(b);
     if (lhs < rhs) return -1;
@@ -429,12 +433,11 @@ compare(const void *a, const void *b, const ecs_type_info_t *info) {
 }
 
 // 5. Compare function if only `>` is defined, deducing the rest
-template <typename T>
-typename std::enable_if<
+template <typename T, if_t<
     has_operator_greater<T>::value &&
     !has_operator_less<T>::value &&
-    !has_operator_equal<T>::value, int>::type
-compare(const void *a, const void *b, const ecs_type_info_t *info) {
+    !has_operator_equal<T>::value > = 0>
+int compare(const void *a, const void *b, const ecs_type_info_t *info) {
     const T& lhs = *static_cast<const T*>(a);
     const T& rhs = *static_cast<const T*>(b);
     if (lhs > rhs) return 1;
@@ -443,12 +446,11 @@ compare(const void *a, const void *b, const ecs_type_info_t *info) {
 }
 
 // 6. Compare function if only `==` is defined, compare pointers to decide greater or smaller
-template <typename T>
-typename std::enable_if<
+template <typename T, if_t<
     has_operator_equal<T>::value &&
     !has_operator_less<T>::value &&
-    !has_operator_greater<T>::value, int>::type
-compare(const void *a, const void *b, const ecs_type_info_t *info) {
+    !has_operator_greater<T>::value > = 0>
+int compare(const void *a, const void *b, const ecs_type_info_t *info) {
     const T& lhs = *static_cast<const T*>(a);
     const T& rhs = *static_cast<const T*>(b);
     if (lhs == rhs) return 0;
@@ -456,12 +458,11 @@ compare(const void *a, const void *b, const ecs_type_info_t *info) {
 }
 
 // 7. No valid operators are defined, compare pointers
-template <typename T>
-typename std::enable_if<
+template <typename T, if_t<
     !has_operator_less<T>::value &&
     !has_operator_greater<T>::value &&
-    !has_operator_equal<T>::value, int>::type
-compare(const void *a, const void *b, const ecs_type_info_t *info) {
+    !has_operator_equal<T>::value > = 0>
+int compare(const void *a, const void *b, const ecs_type_info_t *info) {
     return a == b ? 0 : (a < b) ? -1 : 1;
 }
 

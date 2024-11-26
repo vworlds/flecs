@@ -19086,6 +19086,7 @@ void ecs_set_hooks_id(
     if (h->move_ctor) ti->hooks.move_ctor = h->move_ctor;
     if (h->ctor_move_dtor) ti->hooks.ctor_move_dtor = h->ctor_move_dtor;
     if (h->move_dtor) ti->hooks.move_dtor = h->move_dtor;
+    if (h->comp) ti->hooks.comp = h->comp;
 
     if (h->on_add) ti->hooks.on_add = h->on_add;
     if (h->on_remove) ti->hooks.on_remove = h->on_remove;
@@ -42786,6 +42787,16 @@ int flecs_expr_ser_primitive(
 void flecs_rtt_init_default_hooks(
     ecs_iter_t *it);
 
+int flecs_default_comp(
+    const void *a_ptr,
+    const void *b_ptr,
+    const ecs_type_info_t *ti);
+
+int ecs_string_compare(
+    const void *str_a,
+    const void *str_b,
+    const ecs_type_info_t *ti);
+
 #endif
 
 #endif
@@ -49660,7 +49671,10 @@ void flecs_meta_import_core_definitions(
             }),
             .type = {
                 .size = ECS_SIZEOF(const char*),
-                .alignment = ECS_ALIGNOF(const char*)
+                .alignment = ECS_ALIGNOF(const char*),
+                .hooks = {
+                    .comp = ecs_string_compare,
+                }
             }          
         }),
         .type = {
@@ -49934,6 +49948,23 @@ static ECS_DTOR(ecs_string_t, ptr, {
     *(ecs_string_t*)ptr = NULL;
 })
 
+int ecs_string_compare(
+    const void *str_a,
+    const void *str_b,
+    const ecs_type_info_t *ti) {
+    (void)ti;
+    if(str_a == str_b) {
+        return 0;
+    }
+    if(str_a == NULL) {
+        return -1;
+    }
+    if(str_b == NULL) {
+        return 1;
+    }
+    return ecs_os_strcmp(str_a, str_b);
+}
+
 
 /* EcsTypeSerializer lifecycle */
 
@@ -50155,6 +50186,14 @@ const char* flecs_type_kind_str(
     }
 }
 
+int flecs_default_comp(
+    const void *a_ptr,
+    const void *b_ptr,
+    const ecs_type_info_t *ti)
+{
+    return ecs_os_memcmp(a_ptr, b_ptr, ti->size);
+}
+
 static
 int flecs_init_type(
     ecs_world_t *world,
@@ -50175,8 +50214,13 @@ int flecs_init_type(
          * serializers on uninitialized values. For runtime types (rtt), the default hooks are set
          by flecs_meta_rtt_init_default_hooks */
         ecs_type_info_t *ti = flecs_type_info_ensure(world, type);
-        if (meta_type->existing && !ti->hooks.ctor) {
+        if (meta_type->existing) {
+          if (!ti->hooks.ctor) {
             ti->hooks.ctor = flecs_default_ctor;
+          }
+          if (kind == EcsPrimitiveType && !ti->hooks.comp) {
+            ti->hooks.comp = flecs_default_comp;
+          }
         } 
     } else {
         if (meta_type->kind != kind) {
@@ -51338,7 +51382,8 @@ void FlecsMetaImport(
         .ctor = flecs_default_ctor,
         .copy = ecs_copy(ecs_string_t),
         .move = ecs_move(ecs_string_t),
-        .dtor = ecs_dtor(ecs_string_t)
+        .dtor = ecs_dtor(ecs_string_t),
+        .comp = ecs_string_compare
     });
 
     /* Set default child components */
@@ -51372,6 +51417,7 @@ typedef struct ecs_rtt_call_data_t {
         ecs_xtor_t xtor;
         ecs_move_t move;
         ecs_copy_t copy;
+        ecs_comp_t comp;
     } hook;
     const ecs_type_info_t *type_info;
     int32_t offset;
@@ -51380,10 +51426,11 @@ typedef struct ecs_rtt_call_data_t {
 
 /* Lifecycle context for runtime structs */
 typedef struct ecs_rtt_struct_ctx_t {
-    ecs_vec_t vctor; /* vector<ecs_string_initializertt_call_data_t> */
+    ecs_vec_t vctor; /* vector<ecs_rtt_call_data_t> */
     ecs_vec_t vdtor; /* vector<ecs_rtt_call_data_t> */
     ecs_vec_t vmove; /* vector<ecs_rtt_call_data_t> */
     ecs_vec_t vcopy; /* vector<ecs_rtt_call_data_t> */
+    ecs_vec_t vcomp; /* vector<ecs_rtt_call_data_t> */
 } ecs_rtt_struct_ctx_t;
 
 /* Lifecycle context for runtime arrays */
@@ -51417,6 +51464,17 @@ void flecs_rtt_default_move(
     const ecs_type_info_t *type_info)
 {
     flecs_rtt_default_copy(dst_ptr, src_ptr, count, type_info);
+}
+
+/* Generic compare hook */
+static
+int flecs_rtt_fallback_comp(
+    const void *a_ptr,
+    const void *b_ptr,
+    const ecs_type_info_t *type_info)
+{
+    (void)type_info;
+     return a_ptr == b_ptr ? 0 : (a_ptr < b_ptr) ? -1 : 1;
 }
 
 /*
@@ -51539,6 +51597,45 @@ void flecs_rtt_struct_copy(
     }
 }
 
+/* Generic compare hook. It will read hook information call data from the
+ * structs's lifecycle context and call the compare hooks configured when
+ * the type was created. */
+static
+int flecs_rtt_struct_comp(
+    const void *a_ptr,
+    const void *b_ptr,
+    const ecs_type_info_t *type_info)
+{
+    if(a_ptr == b_ptr) {
+        return 0;
+    }
+
+    ecs_rtt_struct_ctx_t *rtt_ctx = type_info->hooks.lifecycle_ctx;
+    ecs_assert(rtt_ctx != NULL, ECS_INTERNAL_ERROR, NULL);
+
+    int cb_count = ecs_vec_count(&rtt_ctx->vcomp);
+    int i;
+    for (i = 0; i < cb_count; i++) {
+        ecs_rtt_call_data_t *comp_data =
+        ecs_vec_get_t(&rtt_ctx->vcomp, ecs_rtt_call_data_t, i);
+        int c = comp_data->hook.comp(
+            ECS_OFFSET(a_ptr, comp_data->offset),
+            ECS_OFFSET(b_ptr, comp_data->offset),
+            comp_data->type_info);
+        if (c != 0) {
+            return c;
+        }
+    }
+    return 0;
+}
+
+static
+void flecs_rtt_free_lifecycle_nop(
+    void *ctx)
+{
+    (void)ctx;
+}
+
 static
 void flecs_rtt_free_lifecycle_struct_ctx(
     void *ctx)
@@ -51553,6 +51650,7 @@ void flecs_rtt_free_lifecycle_struct_ctx(
     ecs_vec_fini_t(NULL, &lifecycle_ctx->vdtor, ecs_rtt_call_data_t);
     ecs_vec_fini_t(NULL, &lifecycle_ctx->vmove, ecs_rtt_call_data_t);
     ecs_vec_fini_t(NULL, &lifecycle_ctx->vcopy, ecs_rtt_call_data_t);
+    ecs_vec_fini_t(NULL, &lifecycle_ctx->vcomp, ecs_rtt_call_data_t);
 
     ecs_os_free(ctx);
 }
@@ -51562,10 +51660,11 @@ ecs_rtt_struct_ctx_t * flecs_rtt_configure_struct_hooks(
     ecs_world_t *world,
     const ecs_type_info_t *ti,
     ecs_type_hooks_flags_t flags,
-    bool ctor,
-    bool dtor,
-    bool move,
-    bool copy)
+    ecs_xtor_t ctor,
+    ecs_xtor_t dtor,
+    ecs_move_t move,
+    ecs_copy_t copy,
+    ecs_comp_t comp)
 {
     ecs_type_hooks_t hooks = ti->hooks;
     if (hooks.lifecycle_ctx_free) {
@@ -51573,31 +51672,34 @@ ecs_rtt_struct_ctx_t * flecs_rtt_configure_struct_hooks(
     }
 
     ecs_rtt_struct_ctx_t *rtt_ctx = NULL;
-    if (ctor || dtor || move || copy) {
+    if (ctor || dtor || move || copy || comp == flecs_rtt_struct_comp) {
         rtt_ctx = ecs_os_malloc_t(ecs_rtt_struct_ctx_t);
         ecs_vec_init_t(NULL, &rtt_ctx->vctor, ecs_rtt_call_data_t, 0);
         ecs_vec_init_t(NULL, &rtt_ctx->vdtor, ecs_rtt_call_data_t, 0);
         ecs_vec_init_t(NULL, &rtt_ctx->vmove, ecs_rtt_call_data_t, 0);
         ecs_vec_init_t(NULL, &rtt_ctx->vcopy, ecs_rtt_call_data_t, 0);
+        ecs_vec_init_t(NULL, &rtt_ctx->vcomp, ecs_rtt_call_data_t, 0);
         hooks.lifecycle_ctx = rtt_ctx;
         hooks.lifecycle_ctx_free = flecs_rtt_free_lifecycle_struct_ctx;
 
         if (ctor) {
-            hooks.ctor = flecs_rtt_struct_ctor;
+            hooks.ctor = ctor;
         }
         if (dtor) {
-            hooks.dtor = flecs_rtt_struct_dtor;
+            hooks.dtor = dtor;
         }
         if (move) {
-            hooks.move = flecs_rtt_struct_move;
+            hooks.move = move;
         }
         if (copy) {
-            hooks.copy = flecs_rtt_struct_copy;
+            hooks.copy = copy;
         }
     } else {
         hooks.lifecycle_ctx = NULL;
-        hooks.lifecycle_ctx_free = NULL;
+        hooks.lifecycle_ctx_free = flecs_rtt_free_lifecycle_nop;
     }
+    hooks.comp = comp;
+
     hooks.flags |= flags;
     ecs_set_hooks_id(world, ti->component, &hooks);
     return rtt_ctx;
@@ -51622,6 +51724,9 @@ void flecs_rtt_init_default_hooks_struct(
     bool dtor_hook_required = false;
     bool move_hook_required = false;
     bool copy_hook_required = false;
+    bool comp_hook_default = true;
+    bool comp_hook_fallback = false;
+    ecs_size_t total_size = 0;
 
     /* Iterate all struct members and see if any member type has hooks. If so,
      * the struct itself will need to have that hook: */
@@ -51636,8 +51741,31 @@ void flecs_rtt_init_default_hooks_struct(
         dtor_hook_required |= member_ti->hooks.dtor != NULL;
         move_hook_required |= member_ti->hooks.move != NULL;
         copy_hook_required |= member_ti->hooks.copy != NULL;
+        
         flags |= member_ti->hooks.flags;
+
+        /* A struct can be trivially compared via memcmp (flecs_default_comp) if
+        all its members are themselves trivially comparable and the struct
+        has no alignment gaps */
+        comp_hook_default  &= member_ti->hooks.comp == flecs_default_comp;
+        total_size += member_ti->size; /* track gaps in the struct */
+
+        /* if any struct member is not comparable, then the struct itself is
+         * not comparable other than by pointer equality */        
+        comp_hook_fallback  |= member_ti->hooks.comp == NULL || 
+            member_ti->hooks.comp == flecs_rtt_fallback_comp ;
     }
+
+    /* If the sum of all member sizes does not equal the struct size,
+     * the struct is not tightly packed: it has gaps due to alignment 
+     * of its members and can't be trivially compared with memcmp */
+    comp_hook_default &= total_size == ti->size;
+
+    /* After examining all struct members, decide how this struct may be
+     * compared: member by member, as a whole via memcmp or
+     * worst case, fallback to pointer comparison */
+    ecs_comp_t comp_hook = comp_hook_fallback ? flecs_rtt_fallback_comp : 
+                comp_hook_default ? flecs_default_comp : flecs_rtt_struct_comp;
 
     /* If any hook is required, then create a lifecycle context and configure a
      * generic hook that will interpret that context: */
@@ -51645,13 +51773,15 @@ void flecs_rtt_init_default_hooks_struct(
         world,
         ti,
         flags,
-        ctor_hook_required,
-        dtor_hook_required,
-        move_hook_required,
-        copy_hook_required);
+        ctor_hook_required ? flecs_rtt_struct_ctor : NULL,
+        dtor_hook_required ? flecs_rtt_struct_dtor : NULL,
+        move_hook_required ? flecs_rtt_struct_move : NULL,
+        copy_hook_required ? flecs_rtt_struct_copy : NULL,
+        comp_hook
+        );
 
     if (!rtt_ctx) {
-        return; /* no hooks required */
+        return; /* no hook forwarding required */
     }
 
     /* At least a hook was configured, therefore examine each struct member to
@@ -51703,6 +51833,15 @@ void flecs_rtt_init_default_hooks_struct(
             } else {
                 copy_data->hook.copy = flecs_rtt_default_copy;
             }
+        }
+        if (comp_hook == flecs_rtt_struct_comp) {
+            ecs_rtt_call_data_t *comp_data =
+            ecs_vec_append_t(NULL, &rtt_ctx->vcomp, ecs_rtt_call_data_t);
+            comp_data->offset = m->offset;
+            comp_data->type_info = member_ti;
+            comp_data->count = 1;
+            ecs_assert(member_ti->hooks.comp, ECS_INTERNAL_ERROR, NULL);
+            comp_data->hook.comp = member_ti->hooks.comp;
         }
     }
 }
@@ -51800,6 +51939,34 @@ void flecs_rtt_array_copy(
     }
 }
 
+/* Generic array compare hook. It will invoke the compare hook of the underlying
+ * type for each element */
+static
+int flecs_rtt_array_comp(
+    const void *a_ptr,
+    const void *b_ptr,
+    const ecs_type_info_t *type_info)
+{
+    if(a_ptr == b_ptr) {
+        return 0;
+    }
+
+    ecs_rtt_array_ctx_t *rtt_ctx = type_info->hooks.lifecycle_ctx;
+    ecs_comp_t comp = rtt_ctx->type_info->hooks.comp;
+    comp = comp ? comp : flecs_rtt_fallback_comp;
+    ecs_size_t element_size = rtt_ctx->type_info->size;
+    int i;
+    for (i = 0; i < rtt_ctx->elem_count; i++) {
+        const void *a_element = ECS_ELEM(a_ptr, element_size, i);
+        const void *b_element = ECS_ELEM(b_ptr, element_size, i);
+        int c = comp(a_element, b_element, rtt_ctx->type_info);
+        if(c != 0) {
+            return c;
+        }
+    }
+    return 0;
+}
+
 /* Checks if an array's underlying type has hooks installed. If so, it generates
  * and installs required hooks for the array type itself. These hooks will
  * invoke the underlying type's hook for each element in the array. */
@@ -51810,16 +51977,25 @@ void flecs_rtt_init_default_hooks_array(
 {
     const EcsArray *array_info = ecs_get(world, component, EcsArray);
     ecs_assert(array_info != NULL, ECS_INTERNAL_ERROR, NULL);
-    const ecs_type_info_t *array_ti =
+    const ecs_type_info_t *element_ti =
         ecs_get_type_info(world, array_info->type);
     bool ctor_hook_required =
-        array_ti->hooks.ctor && array_ti->hooks.ctor != flecs_default_ctor;
-    bool dtor_hook_required = array_ti->hooks.dtor != NULL;
-    bool move_hook_required = array_ti->hooks.move != NULL;
-    bool copy_hook_required = array_ti->hooks.copy != NULL;
-    ecs_type_hooks_flags_t flags = array_ti->hooks.flags;
+        element_ti->hooks.ctor && element_ti->hooks.ctor != flecs_default_ctor;
+    bool dtor_hook_required = element_ti->hooks.dtor != NULL;
+    bool move_hook_required = element_ti->hooks.move != NULL;
+    bool copy_hook_required = element_ti->hooks.copy != NULL;
+    bool comp_hook_default = element_ti->hooks.comp == flecs_default_comp;
+    bool comp_hook_fallback = element_ti->hooks.comp == NULL || 
+        element_ti->hooks.comp == flecs_rtt_fallback_comp;
+    
+    ecs_type_hooks_flags_t flags = element_ti->hooks.flags;
 
     ecs_type_hooks_t hooks = *ecs_get_hooks_id(world, component);
+    
+    /* Decide how this array may be compared: element by element, as a whole 
+     * via memcmp or worst case, fallback to pointer comparison */
+    hooks.comp = comp_hook_fallback ? flecs_rtt_fallback_comp : 
+                comp_hook_default ? flecs_default_comp : flecs_rtt_array_comp;
 
     if (hooks.lifecycle_ctx_free) {
         hooks.lifecycle_ctx_free(hooks.lifecycle_ctx);
@@ -51827,9 +52003,9 @@ void flecs_rtt_init_default_hooks_array(
     }
 
     if (ctor_hook_required || dtor_hook_required || move_hook_required ||
-        copy_hook_required) {
+        copy_hook_required || hooks.comp == flecs_rtt_array_comp) {
         ecs_rtt_array_ctx_t *rtt_ctx = ecs_os_malloc_t(ecs_rtt_array_ctx_t);
-        rtt_ctx->type_info = array_ti;
+        rtt_ctx->type_info = element_ti;
         rtt_ctx->elem_count = array_info->count;
         if (hooks.lifecycle_ctx_free) {
             hooks.lifecycle_ctx_free(hooks.lifecycle_ctx);
@@ -51969,6 +52145,55 @@ void flecs_rtt_vector_copy(
     }
 }
 
+/* Generic vector compare hook. */
+static
+int flecs_rtt_vector_comp(
+    const void *a_ptr,
+    const void *b_ptr,
+    const ecs_type_info_t *type_info)
+{
+    if(a_ptr == b_ptr) {
+        return 0;
+    }
+
+    const ecs_vec_t *vec_a = a_ptr;
+    const ecs_vec_t *vec_b = b_ptr;
+
+    ecs_size_t count_a = ecs_vec_count(vec_a);
+    ecs_size_t count_b = ecs_vec_count(vec_b);
+    {
+        int c = count_a - count_b;
+        if(c != 0) {
+            return c;
+        }
+    }
+
+    ecs_rtt_vector_ctx_t *rtt_ctx = type_info->hooks.lifecycle_ctx;
+    ecs_comp_t comp = rtt_ctx->type_info->hooks.comp;
+    ecs_size_t element_size = rtt_ctx->type_info->size;
+    const void *a = ecs_vec_first(vec_a);
+    const void *b = ecs_vec_first(vec_b);
+
+    if(comp == flecs_rtt_fallback_comp || comp == NULL) {
+        return a == b ? 0 : (a < b) ? -1 : 1;
+    }
+
+    if(comp == flecs_default_comp) {
+        return ecs_os_memcmp(a, b, element_size * count_a);
+    }
+
+    int i;
+    for (i = 0; i < count_a; i++) {
+        const void *a_element = ECS_ELEM(a_ptr, element_size, i);
+        const void *b_element = ECS_ELEM(b_ptr, element_size, i);
+        int c = comp(a_element, b_element, rtt_ctx->type_info);
+        if(c != 0) {
+            return c;
+        }
+    }
+    return 0;
+}
+
 /* Generates and installs required hooks for managing the vector and underlying
  * type lifecycle. Vectors always have hooks because at the very least the
  * vector structure itself must be initialized/destroyed/copied/moved, even if
@@ -51980,20 +52205,25 @@ void flecs_rtt_init_default_hooks_vector(
 {
     const EcsVector *vector_info = ecs_get(world, component, EcsVector);
     ecs_assert(vector_info != NULL, ECS_INTERNAL_ERROR, NULL);
-    const ecs_type_info_t *vector_ti =
+    const ecs_type_info_t *element_ti =
         ecs_get_type_info(world, vector_info->type);
     ecs_rtt_vector_ctx_t *rtt_ctx = ecs_os_malloc_t(ecs_rtt_vector_ctx_t);
-    rtt_ctx->type_info = vector_ti;
+    rtt_ctx->type_info = element_ti;
+
     ecs_type_hooks_t hooks = *ecs_get_hooks_id(world, component);
+    
     if (hooks.lifecycle_ctx_free) {
         hooks.lifecycle_ctx_free(hooks.lifecycle_ctx);
     }
     hooks.lifecycle_ctx = rtt_ctx;
     hooks.lifecycle_ctx_free = flecs_rtt_free_lifecycle_vector_ctx;
+
     hooks.ctor = flecs_rtt_vector_ctor;
     hooks.dtor = flecs_rtt_vector_dtor;
     hooks.move = flecs_rtt_vector_move;
     hooks.copy = flecs_rtt_vector_copy;
+    hooks.comp = flecs_rtt_vector_comp;
+    
     ecs_set_hooks_id(world, component, &hooks);
 }
 
@@ -52040,10 +52270,12 @@ void flecs_rtt_init_default_hooks(
          * could cause serializers to crash when for example inspecting string
          * fields. */
         if (!ti || !ti->hooks.ctor) {
+            ecs_type_hooks_t hooks = ti->hooks;
+            hooks.ctor = flecs_default_ctor;
             ecs_set_hooks_id(
                 world,
                 component,
-                &(ecs_type_hooks_t){.ctor = flecs_default_ctor});
+                &hooks);
         }
     }
 }

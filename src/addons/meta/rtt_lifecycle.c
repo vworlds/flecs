@@ -228,6 +228,13 @@ int flecs_rtt_struct_comp(
 }
 
 static
+void flecs_rtt_free_lifecycle_nop(
+    void *ctx)
+{
+    (void)ctx;
+}
+
+static
 void flecs_rtt_free_lifecycle_struct_ctx(
     void *ctx)
 {
@@ -287,7 +294,7 @@ ecs_rtt_struct_ctx_t * flecs_rtt_configure_struct_hooks(
         }
     } else {
         hooks.lifecycle_ctx = NULL;
-        hooks.lifecycle_ctx_free = NULL;
+        hooks.lifecycle_ctx_free = flecs_rtt_free_lifecycle_nop;
     }
     hooks.comp = comp;
 
@@ -861,10 +868,12 @@ void flecs_rtt_init_default_hooks(
          * could cause serializers to crash when for example inspecting string
          * fields. */
         if (!ti || !ti->hooks.ctor) {
+            ecs_type_hooks_t hooks = ti->hooks;
+            hooks.ctor = flecs_default_ctor;
             ecs_set_hooks_id(
                 world,
                 component,
-                &(ecs_type_hooks_t){.ctor = flecs_default_ctor});
+                &hooks);
         }
     }
 }

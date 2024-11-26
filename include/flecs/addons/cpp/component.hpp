@@ -112,6 +112,8 @@ void register_lifecycle_actions(
     cl.ctor_move_dtor = ctor_move_dtor<T>(cl.flags);
     cl.move_dtor = move_dtor<T>(cl.flags);
 
+    cl.comp = compare<T>;
+
     ecs_set_hooks_id(world, component, &cl);
 
     if (cl.flags & ECS_MOVE_ILLEGAL || cl.flags & ECS_MOVE_CTOR_ILLEGAL) {

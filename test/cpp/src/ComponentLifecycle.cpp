@@ -2243,3 +2243,28 @@ void ComponentLifecycle_count_in_remove_hook(void) {
 
     test_int(matched, 0);
 }
+
+struct A {
+    int value;
+    bool operator>(const A &other) {
+        return value > other.value;
+    }
+};
+
+int compare_component(flecs::world& ecs, flecs::entity_t id, const void *a, const void *b) {
+    const ecs_type_info_t* ti = ecs_get_type_info(ecs, id);
+    return ti->hooks.comp(a, b, ti);
+}
+
+void ComponentLifecycle_compare(void) {
+    flecs::world ecs;
+
+    auto a = ecs.component<A>();
+
+    A c1 = {1};
+    A c2 = {2};
+
+    int r = compare_component(ecs, a, &c1, &c2);
+
+    test_assert(r < 0);
+}

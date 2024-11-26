@@ -25,6 +25,23 @@ static ECS_DTOR(ecs_string_t, ptr, {
     *(ecs_string_t*)ptr = NULL;
 })
 
+int ecs_string_compare(
+    const void *str_a,
+    const void *str_b,
+    const ecs_type_info_t *ti) {
+    (void)ti;
+    if(str_a == str_b) {
+        return 0;
+    }
+    if(str_a == NULL) {
+        return -1;
+    }
+    if(str_b == NULL) {
+        return 1;
+    }
+    return ecs_os_strcmp(str_a, str_b);
+}
+
 
 /* EcsTypeSerializer lifecycle */
 
@@ -246,6 +263,14 @@ const char* flecs_type_kind_str(
     }
 }
 
+int flecs_default_comp(
+    const void *a_ptr,
+    const void *b_ptr,
+    const ecs_type_info_t *ti)
+{
+    return ecs_os_memcmp(a_ptr, b_ptr, ti->size);
+}
+
 static
 int flecs_init_type(
     ecs_world_t *world,
@@ -266,8 +291,13 @@ int flecs_init_type(
          * serializers on uninitialized values. For runtime types (rtt), the default hooks are set
          by flecs_meta_rtt_init_default_hooks */
         ecs_type_info_t *ti = flecs_type_info_ensure(world, type);
-        if (meta_type->existing && !ti->hooks.ctor) {
+        if (meta_type->existing) {
+          if (!ti->hooks.ctor) {
             ti->hooks.ctor = flecs_default_ctor;
+          }
+          if (kind == EcsPrimitiveType && !ti->hooks.comp) {
+            ti->hooks.comp = flecs_default_comp;
+          }
         } 
     } else {
         if (meta_type->kind != kind) {
@@ -1429,7 +1459,8 @@ void FlecsMetaImport(
         .ctor = flecs_default_ctor,
         .copy = ecs_copy(ecs_string_t),
         .move = ecs_move(ecs_string_t),
-        .dtor = ecs_dtor(ecs_string_t)
+        .dtor = ecs_dtor(ecs_string_t),
+        .comp = ecs_string_compare
     });
 
     /* Set default child components */

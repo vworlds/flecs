@@ -461,7 +461,7 @@ template <typename T, if_t<
     has_operator_less<T>::value ||
     has_operator_greater<T>::value ||
     has_operator_equal<T>::value > = 0>
-ecs_comp_t compare(ecs_type_hooks_compare_flags_t &) {
+ecs_comp_t compare() {
     return compare_impl<T>;
 }
 
@@ -469,8 +469,7 @@ template <typename T, if_t<
     !has_operator_less<T>::value &&
     !has_operator_greater<T>::value &&
     !has_operator_equal<T>::value > = 0>
-ecs_comp_t compare(ecs_type_hooks_compare_flags_t &compare_flags) {
-    compare_flags |= ECS_COMP_DEFAULT;
+ecs_comp_t compare() {
     return NULL;
 }
 

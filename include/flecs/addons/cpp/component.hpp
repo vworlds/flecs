@@ -101,7 +101,7 @@ void register_lifecycle_actions(
     } 
 
     ecs_type_hooks_t cl{};
-    cl.comp = compare<T>(cl.compare_flags);
+    cl.comp = compare<T>();
     ecs_set_hooks_id(world, component, &cl); 
 }
 
@@ -126,7 +126,7 @@ void register_lifecycle_actions(
     cl.ctor_move_dtor = ctor_move_dtor<T>(cl.flags);
     cl.move_dtor = move_dtor<T>(cl.flags);
 
-    cl.comp = compare<T>(cl.compare_flags);
+    cl.comp = compare<T>();
 
     ecs_set_hooks_id(world, component, &cl);
 

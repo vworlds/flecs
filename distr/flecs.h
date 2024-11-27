@@ -3540,9 +3540,6 @@ struct ecs_observer_t {
 #define ECS_MOVE_DTOR_ILLEGAL      (1 << 7)
 typedef uint8_t ecs_type_hooks_flags_t;
 
-#define ECS_COMP_DEFAULT           (1 << 0)
-typedef uint8_t ecs_type_hooks_compare_flags_t;
-
 struct ecs_type_hooks_t {
     ecs_xtor_t ctor;            /**< ctor */
     ecs_xtor_t dtor;            /**< dtor */
@@ -3575,8 +3572,6 @@ struct ecs_type_hooks_t {
     */
     ecs_type_hooks_flags_t flags;
 
-    ecs_type_hooks_compare_flags_t compare_flags;
-    
     /** Callback that is invoked when an instance of a component is added. This
      * callback is invoked before triggers are invoked. */
     ecs_iter_action_t on_add;
@@ -20603,7 +20598,7 @@ template <typename T, if_t<
     has_operator_less<T>::value ||
     has_operator_greater<T>::value ||
     has_operator_equal<T>::value > = 0>
-ecs_comp_t compare(ecs_type_hooks_compare_flags_t &) {
+ecs_comp_t compare() {
     return compare_impl<T>;
 }
 
@@ -20611,8 +20606,7 @@ template <typename T, if_t<
     !has_operator_less<T>::value &&
     !has_operator_greater<T>::value &&
     !has_operator_equal<T>::value > = 0>
-ecs_comp_t compare(ecs_type_hooks_compare_flags_t &compare_flags) {
-    compare_flags |= ECS_COMP_DEFAULT;
+ecs_comp_t compare() {
     return NULL;
 }
 
@@ -26957,7 +26951,7 @@ void register_lifecycle_actions(
     } 
 
     ecs_type_hooks_t cl{};
-    cl.comp = compare<T>(cl.compare_flags);
+    cl.comp = compare<T>();
     ecs_set_hooks_id(world, component, &cl); 
 }
 
@@ -26982,7 +26976,7 @@ void register_lifecycle_actions(
     cl.ctor_move_dtor = ctor_move_dtor<T>(cl.flags);
     cl.move_dtor = move_dtor<T>(cl.flags);
 
-    cl.comp = compare<T>(cl.compare_flags);
+    cl.comp = compare<T>();
 
     ecs_set_hooks_id(world, component, &cl);
 

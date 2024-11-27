@@ -19226,13 +19226,6 @@ void ecs_set_hooks_id(
         ti->hooks.ctor_move_dtor = ecs_move_ctor_illegal;
     }
 
-    if(h->compare_flags & ECS_COMP_DEFAULT ||
-         ti->hooks.comp == NULL || 
-         ti->hooks.comp == flecs_default_comp) {
-        ti->hooks.compare_flags |= ECS_COMP_DEFAULT;
-        ti->hooks.comp = flecs_default_comp;
-    }
-
     ti->hooks.flags = flags;
 
 error:
@@ -51886,7 +51879,11 @@ ecs_rtt_struct_ctx_t * flecs_rtt_configure_struct_hooks(
         hooks.lifecycle_ctx = NULL;
         hooks.lifecycle_ctx_free = flecs_rtt_free_lifecycle_nop;
     }
-    hooks.comp = comp;
+    if(comp) {
+        hooks.comp = comp;
+    } else {
+        hooks.comp = flecs_default_comp;
+    }
 
     hooks.flags |= flags;
     ecs_set_hooks_id(world, ti->component, &hooks);
@@ -51931,7 +51928,7 @@ void flecs_rtt_init_default_hooks_struct(
         /* A struct is default-comparable if all its members 
          * are default-comparable */
         default_comparable  &= member_ti->hooks.comp == NULL ||
-            member_ti->hooks.compare_flags & ECS_COMP_DEFAULT;
+            member_ti->hooks.comp == flecs_default_comp;
         
         flags |= member_ti->hooks.flags;
     }
@@ -52161,10 +52158,9 @@ void flecs_rtt_init_default_hooks_array(
 
     ecs_type_hooks_t hooks = *ecs_get_hooks_id(world, component);
     
-    if(element_ti->hooks.compare_flags & ECS_COMP_DEFAULT ||
-        element_ti->hooks.comp == NULL) {
+    if(element_ti->hooks.comp == NULL ||
+        element_ti->hooks.comp == flecs_default_comp) {
         hooks.comp = flecs_default_comp;
-        hooks.compare_flags |= ECS_COMP_DEFAULT;
     } else {
         hooks.comp = flecs_rtt_array_comp;
     }
@@ -52389,10 +52385,9 @@ void flecs_rtt_init_default_hooks_vector(
     hooks.move = flecs_rtt_vector_move;
     hooks.copy = flecs_rtt_vector_copy;
 
-    if(element_ti->hooks.compare_flags & ECS_COMP_DEFAULT ||
-         element_ti->hooks.comp == NULL) {
-        hooks.comp = NULL;
-        hooks.compare_flags |= ECS_COMP_DEFAULT;
+    if(element_ti->hooks.comp == NULL ||
+         element_ti->hooks.comp == flecs_default_comp) {
+        hooks.comp = flecs_default_comp;
     } else {
         hooks.comp = flecs_rtt_vector_comp;
     }
@@ -52456,7 +52451,6 @@ void flecs_rtt_init_default_hooks(
 
         if(!ti->hooks.comp) {
             hooks.comp = flecs_default_comp;
-            hooks.compare_flags |= ECS_COMP_DEFAULT;
         }
 
         ecs_set_hooks_id(

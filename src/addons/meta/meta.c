@@ -225,10 +225,12 @@ int ecs_compare_id(
 
 
 int ecs_compare_string(
-    const void *str_a,
-    const void *str_b,
+    const void *a_ptr,
+    const void *b_ptr,
     const ecs_type_info_t *ti) {
     (void)ti;
+    const char* str_a = *((const char**) a_ptr);
+    const char* str_b = *((const char**) b_ptr);
     if(str_a == str_b) {
         return 0;
     }

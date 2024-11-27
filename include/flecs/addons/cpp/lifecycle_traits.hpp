@@ -372,10 +372,12 @@ template <typename T>
 struct has_operator_greater<T, void_t<decltype(std::declval<const T&>() > std::declval<const T&>())>> : 
     std::is_same<decltype(std::declval<const T&>() > std::declval<const T&>()), bool> {};
 
-// Trait to check for operator==
-template <typename T, typename = void>
-struct has_operator_equal : std::false_type {};
 
+
+// Trait to check for operator==
+// This trait causes a "float comparison warning" in some compilers
+// when `T` is float or double.
+// Disable this warning with the following pragmas:
 #if defined(__clang__)
     #pragma clang diagnostic push
     #pragma clang diagnostic ignored "-Wfloat-equal"
@@ -384,11 +386,16 @@ struct has_operator_equal : std::false_type {};
     #pragma GCC diagnostic ignored "-Wfloat-equal"
 #endif
 
+template <typename T, typename = void>
+struct has_operator_equal : std::false_type {};
+
 // Only enable if T has an operator== that takes T as the right-hand side (no implicit conversion)
 template <typename T>
 struct has_operator_equal<T, void_t<decltype(std::declval<const T&>() == std::declval<const T&>())>> : 
     std::is_same<decltype(std::declval<const T&>() == std::declval<const T&>()), bool> {};
 
+
+// re-enable the warning:
 #if defined(__clang__)
     #pragma clang diagnostic pop
 #elif defined(__GNUC__) && !defined(__clang__)

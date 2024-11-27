@@ -1359,6 +1359,11 @@ void invoke_type_ctor(
     }
 }
 
+int compare(const ecs_world_t* world, ecs_entity_t id, const void *a, const void *b) {
+    const ecs_type_info_t* ti = ecs_get_type_info(world, id);
+    return ti->hooks.comp(a, b, ti);
+}
+
 /* Test RTT combinations */
 void RuntimeTypes_struct_with_ints(void) {
     ecs_world_t *world = ecs_init();
@@ -1377,21 +1382,23 @@ void RuntimeTypes_struct_with_ints(void) {
 
     /* Test constructor: */
     ecs_entity_t e = ecs_new(world);
+    StructWithInts *ptr1 = ecs_ensure_id(world, e, struct_with_ints);
     {
-        StructWithInts *ptr = ecs_ensure_id(world, e, struct_with_ints);
-        test_memory_zero(ptr, sizeof(StructWithInts));
-        ptr->a = 100;
-        ptr->b = 101;
+        test_memory_zero(ptr1, sizeof(StructWithInts));
+        ptr1->a = 100;
+        ptr1->b = 101;
     }
 
     /* Test copying: */
     ecs_entity_t instance = ecs_clone(world, 0, e, true);
+    const StructWithInts *ptr2 =
+        ecs_get_id(world, instance, struct_with_ints);
     {
-        const StructWithInts *ptr =
-            ecs_get_id(world, instance, struct_with_ints);
-        test_int(100, ptr->a);
-        test_int(101, ptr->b);
+        test_int(100, ptr2->a);
+        test_int(101, ptr2->b);
     }
+
+    test_assert(compare(world, struct_with_ints, ptr1, ptr2) == 0);
 
     /* Test moving by forcing an archetype change: */
     ECS_TAG(world, MakeMeMove);

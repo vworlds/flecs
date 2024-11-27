@@ -1278,6 +1278,17 @@ void ecs_move_ctor_illegal(
     ecs_abort(ECS_INVALID_OPERATION, "invalid move construct for %s", ti->name);
 }
 
+NORETURN
+static
+int ecs_comp_illegal(
+    const void *a_ptr,
+    const void *b_ptr,
+    const ecs_type_info_t *ti)
+{
+    (void)a_ptr; /* silence unused warning */
+    (void)b_ptr;
+    ecs_abort(ECS_INVALID_OPERATION, "invalid compare function for %s", ti->name);
+}
 
 void ecs_set_hooks_id(
     ecs_world_t *world,
@@ -1442,16 +1453,21 @@ void ecs_set_hooks_id(
         ti->hooks.copy_ctor = ecs_copy_ctor_illegal;
     }
 
-    if(ti->hooks.flags & ECS_MOVE_CTOR_ILLEGAL) {
+    if(flags & ECS_MOVE_CTOR_ILLEGAL) {
         ti->hooks.move_ctor = ecs_move_ctor_illegal;
     }
 
-    if(ti->hooks.flags & ECS_CTOR_MOVE_DTOR_ILLEGAL) {
+    if(flags & ECS_CTOR_MOVE_DTOR_ILLEGAL) {
         ti->hooks.ctor_move_dtor = ecs_move_ctor_illegal;
     }
 
-    if(ti->hooks.flags & ECS_MOVE_DTOR_ILLEGAL) {
+    if(flags & ECS_MOVE_DTOR_ILLEGAL) {
         ti->hooks.ctor_move_dtor = ecs_move_ctor_illegal;
+    }
+
+    if(flags & ECS_COMP_ILLEGAL || ti->hooks.comp == NULL || ti->hooks.comp == ecs_comp_illegal) {
+        flags |= ECS_COMP_ILLEGAL;
+        ti->hooks.comp = ecs_comp_illegal;
     }
 
     ti->hooks.flags = flags;

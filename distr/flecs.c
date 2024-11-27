@@ -18955,6 +18955,15 @@ void flecs_default_move_w_dtor(void *dst_ptr, void *src_ptr,
     cl->dtor(src_ptr, count, ti);
 }
 
+int flecs_default_comp(
+    const void *a_ptr,
+    const void *b_ptr,
+    const ecs_type_info_t *ti)
+{
+    (void)ti;
+    return a_ptr == b_ptr ? 0 : (a_ptr < b_ptr) ? -1 : 1;
+}
+
 /* Define noreturn attribute only for GCC or Clang.
  * Certain builds in Windows require this for functions that abort 
  * (-Wmissing-noreturn)
@@ -19040,18 +19049,6 @@ void ecs_move_ctor_illegal(
     (void)src;
     (void)count;
     ecs_abort(ECS_INVALID_OPERATION, "invalid move construct for %s", ti->name);
-}
-
-NORETURN
-static
-int ecs_comp_illegal(
-    const void *a_ptr,
-    const void *b_ptr,
-    const ecs_type_info_t *ti)
-{
-    (void)a_ptr; /* silence unused warning */
-    (void)b_ptr;
-    ecs_abort(ECS_INVALID_OPERATION, "invalid compare function for %s", ti->name);
 }
 
 void ecs_set_hooks_id(
@@ -19229,9 +19226,11 @@ void ecs_set_hooks_id(
         ti->hooks.ctor_move_dtor = ecs_move_ctor_illegal;
     }
 
-    if(flags & ECS_COMP_ILLEGAL || ti->hooks.comp == NULL || ti->hooks.comp == ecs_comp_illegal) {
-        flags |= ECS_COMP_ILLEGAL;
-        ti->hooks.comp = ecs_comp_illegal;
+    if(h->compare_flags & ECS_COMP_DEFAULT ||
+         ti->hooks.comp == NULL || 
+         ti->hooks.comp == flecs_default_comp) {
+        ti->hooks.compare_flags |= ECS_COMP_DEFAULT;
+        ti->hooks.comp = flecs_default_comp;
     }
 
     ti->hooks.flags = flags;
@@ -50054,7 +50053,8 @@ int ecs_compare_i8(
     const ecs_type_info_t *ti)
 {
     (void)ti;
-    return (int)(*((const ecs_i8_t*)a_ptr)) - (int)(*((const ecs_i8_t*)b_ptr));
+    return (int)(*((const ecs_i8_t*)a_ptr)) - 
+           (int)(*((const ecs_i8_t*)b_ptr));
 }
 
 static
@@ -50064,7 +50064,8 @@ int ecs_compare_i16(
     const ecs_type_info_t *ti)
 {
     (void)ti;
-    return (int)(*((const ecs_i16_t*)a_ptr)) - (int)(*((const ecs_i16_t*)b_ptr));
+    return (int)(*((const ecs_i16_t*)a_ptr)) - 
+           (int)(*((const ecs_i16_t*)b_ptr));
 }
 
 static
@@ -51577,10 +51578,6 @@ void FlecsMetaImport(
 
     #undef ECS_PRIMITIVE
 
-    ecs_set_hooks(world, ecs_bool_t, {
-        .comp = ecs_compare_bool
-    });
-
     ecs_set_hooks(world, ecs_string_t, {
         .ctor = flecs_default_ctor,
         .copy = ecs_copy(ecs_string_t),
@@ -51915,7 +51912,7 @@ void flecs_rtt_init_default_hooks_struct(
     bool dtor_hook_required = false;
     bool move_hook_required = false;
     bool copy_hook_required = false;
-    bool comparable = true;
+    bool default_comparable = true;
 
     /* Iterate all struct members and see if any member type has hooks. If so,
      * the struct itself will need to have that hook: */
@@ -51931,17 +51928,12 @@ void flecs_rtt_init_default_hooks_struct(
         move_hook_required |= member_ti->hooks.move != NULL;
         copy_hook_required |= member_ti->hooks.copy != NULL;
 
-        /* A struct may be comparable if all its members have 
-         * a compare hook set: */
-        comparable  &= member_ti->hooks.comp != NULL;
+        /* A struct is default-comparable if all its members 
+         * are default-comparable */
+        default_comparable  &= member_ti->hooks.comp == NULL ||
+            member_ti->hooks.compare_flags & ECS_COMP_DEFAULT;
         
         flags |= member_ti->hooks.flags;
-    }
-
-    /* If any member has an illegal compare function then 
-     * this struct is not comparable */
-    if (flags & ECS_COMP_ILLEGAL) {
-        comparable = false;
     }
 
     /* If any hook is required, then create a lifecycle context and configure a
@@ -51954,7 +51946,7 @@ void flecs_rtt_init_default_hooks_struct(
         dtor_hook_required ? flecs_rtt_struct_dtor : NULL,
         move_hook_required ? flecs_rtt_struct_move : NULL,
         copy_hook_required ? flecs_rtt_struct_copy : NULL,
-        comparable ? flecs_rtt_struct_comp : NULL
+        default_comparable ? NULL : flecs_rtt_struct_comp
         );
 
     if (!rtt_ctx) {
@@ -52011,14 +52003,17 @@ void flecs_rtt_init_default_hooks_struct(
                 copy_data->hook.copy = flecs_rtt_default_copy;
             }
         }
-        if (comparable) {
+        if (!default_comparable) {
             ecs_rtt_call_data_t *comp_data =
             ecs_vec_append_t(NULL, &rtt_ctx->vcomp, ecs_rtt_call_data_t);
             comp_data->offset = m->offset;
             comp_data->type_info = member_ti;
             comp_data->count = 1;
-            ecs_assert(member_ti->hooks.comp, ECS_INTERNAL_ERROR, NULL);
-            comp_data->hook.comp = member_ti->hooks.comp;
+            if(member_ti->hooks.comp) {
+                comp_data->hook.comp = member_ti->hooks.comp; 
+            } else {
+                comp_data->hook.comp = flecs_default_comp;
+            }
         }
     }
 }
@@ -52166,9 +52161,10 @@ void flecs_rtt_init_default_hooks_array(
 
     ecs_type_hooks_t hooks = *ecs_get_hooks_id(world, component);
     
-    if(flags & ECS_COMP_ILLEGAL || element_ti->hooks.comp == NULL) {
-        hooks.comp = NULL;
-        flags |= ECS_COMP_ILLEGAL;
+    if(element_ti->hooks.compare_flags & ECS_COMP_DEFAULT ||
+        element_ti->hooks.comp == NULL) {
+        hooks.comp = flecs_default_comp;
+        hooks.compare_flags |= ECS_COMP_DEFAULT;
     } else {
         hooks.comp = flecs_rtt_array_comp;
     }
@@ -52393,10 +52389,10 @@ void flecs_rtt_init_default_hooks_vector(
     hooks.move = flecs_rtt_vector_move;
     hooks.copy = flecs_rtt_vector_copy;
 
-    if(element_ti->hooks.flags & ECS_COMP_ILLEGAL ||
+    if(element_ti->hooks.compare_flags & ECS_COMP_DEFAULT ||
          element_ti->hooks.comp == NULL) {
         hooks.comp = NULL;
-        hooks.flags |= ECS_COMP_ILLEGAL;
+        hooks.compare_flags |= ECS_COMP_DEFAULT;
     } else {
         hooks.comp = flecs_rtt_vector_comp;
     }
@@ -52449,18 +52445,24 @@ void flecs_rtt_init_default_hooks(
             flecs_rtt_init_default_hooks_vector(world, component);
         }
 
+        ecs_type_hooks_t hooks = ti->hooks;
         /* Make sure there is at least a default constructor. This ensures that
          * a new component value does not contain uninitialized memory, which
          * could cause serializers to crash when for example inspecting string
          * fields. */
         if(!ti->hooks.ctor) {
-            ecs_type_hooks_t hooks = ti->hooks;
             hooks.ctor = flecs_default_ctor;
-            ecs_set_hooks_id(
-                world,
-                component,
-                &hooks);
         }
+
+        if(!ti->hooks.comp) {
+            hooks.comp = flecs_default_comp;
+            hooks.compare_flags |= ECS_COMP_DEFAULT;
+        }
+
+        ecs_set_hooks_id(
+            world,
+            component,
+            &hooks);
     }
 }
 

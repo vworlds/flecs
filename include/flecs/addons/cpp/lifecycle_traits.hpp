@@ -385,7 +385,7 @@ struct has_operator_equal<T, void_t<decltype(std::declval<const T&>() == std::de
 template <typename T, if_t<
     has_operator_less<T>::value &&
     has_operator_greater<T>::value > = 0>
-int compare(const void *a, const void *b, const ecs_type_info_t *info) {
+int compare_impl(const void *a, const void *b, const ecs_type_info_t *) {
     const T& lhs = *static_cast<const T*>(a);
     const T& rhs = *static_cast<const T*>(b);
     if (lhs < rhs) return -1;
@@ -398,7 +398,7 @@ template <typename T, if_t<
     has_operator_less<T>::value &&
     has_operator_equal<T>::value &&
     !has_operator_greater<T>::value > = 0>
-int compare(const void *a, const void *b, const ecs_type_info_t *info) {
+int compare_impl(const void *a, const void *b, const ecs_type_info_t *) {
     const T& lhs = *static_cast<const T*>(a);
     const T& rhs = *static_cast<const T*>(b);
     if (lhs == rhs) return 0;
@@ -411,7 +411,7 @@ template <typename T, if_t<
     has_operator_greater<T>::value &&
     has_operator_equal<T>::value &&
     !has_operator_less<T>::value > = 0>
-int compare(const void *a, const void *b, const ecs_type_info_t *info) {
+int compare_impl(const void *a, const void *b, const ecs_type_info_t *) {
     const T& lhs = *static_cast<const T*>(a);
     const T& rhs = *static_cast<const T*>(b);
     if (lhs == rhs) return 0;
@@ -424,7 +424,7 @@ template <typename T, if_t<
     has_operator_less<T>::value &&
     !has_operator_greater<T>::value &&
     !has_operator_equal<T>::value > = 0>
-int compare(const void *a, const void *b, const ecs_type_info_t *info) {
+int compare_impl(const void *a, const void *b, const ecs_type_info_t *) {
     const T& lhs = *static_cast<const T*>(a);
     const T& rhs = *static_cast<const T*>(b);
     if (lhs < rhs) return -1;
@@ -437,7 +437,7 @@ template <typename T, if_t<
     has_operator_greater<T>::value &&
     !has_operator_less<T>::value &&
     !has_operator_equal<T>::value > = 0>
-int compare(const void *a, const void *b, const ecs_type_info_t *info) {
+int compare_impl(const void *a, const void *b, const ecs_type_info_t *) {
     const T& lhs = *static_cast<const T*>(a);
     const T& rhs = *static_cast<const T*>(b);
     if (lhs > rhs) return 1;
@@ -450,21 +450,30 @@ template <typename T, if_t<
     has_operator_equal<T>::value &&
     !has_operator_less<T>::value &&
     !has_operator_greater<T>::value > = 0>
-int compare(const void *a, const void *b, const ecs_type_info_t *info) {
+int compare_impl(const void *a, const void *b, const ecs_type_info_t *) {
     const T& lhs = *static_cast<const T*>(a);
     const T& rhs = *static_cast<const T*>(b);
     if (lhs == rhs) return 0;
     return (a < b) ? -1 : 1; // Use pointer comparison to decide order
 }
 
-// 7. No valid operators are defined, compare pointers
+template <typename T, if_t<
+    has_operator_less<T>::value ||
+    has_operator_greater<T>::value ||
+    has_operator_equal<T>::value > = 0>
+ecs_comp_t compare(ecs_type_hooks_compare_flags_t &) {
+    return compare_impl<T>;
+}
+
 template <typename T, if_t<
     !has_operator_less<T>::value &&
     !has_operator_greater<T>::value &&
     !has_operator_equal<T>::value > = 0>
-int compare(const void *a, const void *b, const ecs_type_info_t *info) {
-    return a == b ? 0 : (a < b) ? -1 : 1;
+ecs_comp_t compare(ecs_type_hooks_compare_flags_t &compare_flags) {
+    compare_flags |= ECS_COMP_DEFAULT;
+    return NULL;
 }
+
 
 } // _
 } // flecs

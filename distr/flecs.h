@@ -3538,9 +3538,10 @@ struct ecs_observer_t {
 #define ECS_MOVE_CTOR_ILLEGAL      (1 << 5)
 #define ECS_CTOR_MOVE_DTOR_ILLEGAL (1 << 6)
 #define ECS_MOVE_DTOR_ILLEGAL      (1 << 7)
-#define ECS_COMP_ILLEGAL           (1 << 8)
+typedef uint8_t ecs_type_hooks_flags_t;
 
-typedef uint16_t ecs_type_hooks_flags_t;
+#define ECS_COMP_DEFAULT           (1 << 0)
+typedef uint8_t ecs_type_hooks_compare_flags_t;
 
 struct ecs_type_hooks_t {
     ecs_xtor_t ctor;            /**< ctor */
@@ -3573,6 +3574,8 @@ struct ecs_type_hooks_t {
      * Setting any flag will configure an aborting hook
     */
     ecs_type_hooks_flags_t flags;
+
+    ecs_type_hooks_compare_flags_t compare_flags;
     
     /** Callback that is invoked when an instance of a component is added. This
      * callback is invoked before triggers are invoked. */
@@ -3818,6 +3821,12 @@ void flecs_default_ctor(
     void *ptr, 
     int32_t count, 
     const ecs_type_info_t *ctx);
+
+/* Default compare function */
+int flecs_default_comp(
+    const void *a_ptr,
+    const void *b_ptr,
+    const ecs_type_info_t *ti);
 
 /* Create allocated string from format */
 FLECS_DBG_API
@@ -20518,7 +20527,7 @@ struct has_operator_equal<T, void_t<decltype(std::declval<const T&>() == std::de
 template <typename T, if_t<
     has_operator_less<T>::value &&
     has_operator_greater<T>::value > = 0>
-int compare(const void *a, const void *b, const ecs_type_info_t *info) {
+int compare_impl(const void *a, const void *b, const ecs_type_info_t *) {
     const T& lhs = *static_cast<const T*>(a);
     const T& rhs = *static_cast<const T*>(b);
     if (lhs < rhs) return -1;
@@ -20531,7 +20540,7 @@ template <typename T, if_t<
     has_operator_less<T>::value &&
     has_operator_equal<T>::value &&
     !has_operator_greater<T>::value > = 0>
-int compare(const void *a, const void *b, const ecs_type_info_t *info) {
+int compare_impl(const void *a, const void *b, const ecs_type_info_t *) {
     const T& lhs = *static_cast<const T*>(a);
     const T& rhs = *static_cast<const T*>(b);
     if (lhs == rhs) return 0;
@@ -20544,7 +20553,7 @@ template <typename T, if_t<
     has_operator_greater<T>::value &&
     has_operator_equal<T>::value &&
     !has_operator_less<T>::value > = 0>
-int compare(const void *a, const void *b, const ecs_type_info_t *info) {
+int compare_impl(const void *a, const void *b, const ecs_type_info_t *) {
     const T& lhs = *static_cast<const T*>(a);
     const T& rhs = *static_cast<const T*>(b);
     if (lhs == rhs) return 0;
@@ -20557,7 +20566,7 @@ template <typename T, if_t<
     has_operator_less<T>::value &&
     !has_operator_greater<T>::value &&
     !has_operator_equal<T>::value > = 0>
-int compare(const void *a, const void *b, const ecs_type_info_t *info) {
+int compare_impl(const void *a, const void *b, const ecs_type_info_t *) {
     const T& lhs = *static_cast<const T*>(a);
     const T& rhs = *static_cast<const T*>(b);
     if (lhs < rhs) return -1;
@@ -20570,7 +20579,7 @@ template <typename T, if_t<
     has_operator_greater<T>::value &&
     !has_operator_less<T>::value &&
     !has_operator_equal<T>::value > = 0>
-int compare(const void *a, const void *b, const ecs_type_info_t *info) {
+int compare_impl(const void *a, const void *b, const ecs_type_info_t *) {
     const T& lhs = *static_cast<const T*>(a);
     const T& rhs = *static_cast<const T*>(b);
     if (lhs > rhs) return 1;
@@ -20583,21 +20592,30 @@ template <typename T, if_t<
     has_operator_equal<T>::value &&
     !has_operator_less<T>::value &&
     !has_operator_greater<T>::value > = 0>
-int compare(const void *a, const void *b, const ecs_type_info_t *info) {
+int compare_impl(const void *a, const void *b, const ecs_type_info_t *) {
     const T& lhs = *static_cast<const T*>(a);
     const T& rhs = *static_cast<const T*>(b);
     if (lhs == rhs) return 0;
     return (a < b) ? -1 : 1; // Use pointer comparison to decide order
 }
 
-// 7. No valid operators are defined, compare pointers
+template <typename T, if_t<
+    has_operator_less<T>::value ||
+    has_operator_greater<T>::value ||
+    has_operator_equal<T>::value > = 0>
+ecs_comp_t compare(ecs_type_hooks_compare_flags_t &) {
+    return compare_impl<T>;
+}
+
 template <typename T, if_t<
     !has_operator_less<T>::value &&
     !has_operator_greater<T>::value &&
     !has_operator_equal<T>::value > = 0>
-int compare(const void *a, const void *b, const ecs_type_info_t *info) {
-    return a == b ? 0 : (a < b) ? -1 : 1;
+ecs_comp_t compare(ecs_type_hooks_compare_flags_t &compare_flags) {
+    compare_flags |= ECS_COMP_DEFAULT;
+    return NULL;
 }
+
 
 } // _
 } // flecs
@@ -26939,7 +26957,7 @@ void register_lifecycle_actions(
     } 
 
     ecs_type_hooks_t cl{};
-    cl.comp = compare<T>;
+    cl.comp = compare<T>(cl.compare_flags);
     ecs_set_hooks_id(world, component, &cl); 
 }
 
@@ -26964,7 +26982,7 @@ void register_lifecycle_actions(
     cl.ctor_move_dtor = ctor_move_dtor<T>(cl.flags);
     cl.move_dtor = move_dtor<T>(cl.flags);
 
-    cl.comp = compare<T>;
+    cl.comp = compare<T>(cl.compare_flags);
 
     ecs_set_hooks_id(world, component, &cl);
 

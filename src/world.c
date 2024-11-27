@@ -1191,6 +1191,15 @@ void flecs_default_move_w_dtor(void *dst_ptr, void *src_ptr,
     cl->dtor(src_ptr, count, ti);
 }
 
+int flecs_default_comp(
+    const void *a_ptr,
+    const void *b_ptr,
+    const ecs_type_info_t *ti)
+{
+    (void)ti;
+    return a_ptr == b_ptr ? 0 : (a_ptr < b_ptr) ? -1 : 1;
+}
+
 /* Define noreturn attribute only for GCC or Clang.
  * Certain builds in Windows require this for functions that abort 
  * (-Wmissing-noreturn)
@@ -1276,18 +1285,6 @@ void ecs_move_ctor_illegal(
     (void)src;
     (void)count;
     ecs_abort(ECS_INVALID_OPERATION, "invalid move construct for %s", ti->name);
-}
-
-NORETURN
-static
-int ecs_comp_illegal(
-    const void *a_ptr,
-    const void *b_ptr,
-    const ecs_type_info_t *ti)
-{
-    (void)a_ptr; /* silence unused warning */
-    (void)b_ptr;
-    ecs_abort(ECS_INVALID_OPERATION, "invalid compare function for %s", ti->name);
 }
 
 void ecs_set_hooks_id(
@@ -1465,9 +1462,13 @@ void ecs_set_hooks_id(
         ti->hooks.ctor_move_dtor = ecs_move_ctor_illegal;
     }
 
-    if(flags & ECS_COMP_ILLEGAL || ti->hooks.comp == NULL || ti->hooks.comp == ecs_comp_illegal) {
-        flags |= ECS_COMP_ILLEGAL;
-        ti->hooks.comp = ecs_comp_illegal;
+    if(h->compare_flags & ECS_COMP_DEFAULT ||
+         ti->hooks.comp == NULL || 
+         ti->hooks.comp == flecs_default_comp) {
+        ti->hooks.compare_flags |= ECS_COMP_DEFAULT;
+        ti->hooks.comp = flecs_default_comp;
+    } else {
+        ti->hooks.compare_flags &= ~ECS_COMP_DEFAULT;
     }
 
     ti->hooks.flags = flags;

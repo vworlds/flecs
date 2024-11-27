@@ -877,9 +877,10 @@ struct ecs_observer_t {
 #define ECS_MOVE_CTOR_ILLEGAL      (1 << 5)
 #define ECS_CTOR_MOVE_DTOR_ILLEGAL (1 << 6)
 #define ECS_MOVE_DTOR_ILLEGAL      (1 << 7)
-#define ECS_COMP_ILLEGAL           (1 << 8)
+typedef uint8_t ecs_type_hooks_flags_t;
 
-typedef uint16_t ecs_type_hooks_flags_t;
+#define ECS_COMP_DEFAULT           (1 << 0)
+typedef uint8_t ecs_type_hooks_compare_flags_t;
 
 struct ecs_type_hooks_t {
     ecs_xtor_t ctor;            /**< ctor */
@@ -912,6 +913,8 @@ struct ecs_type_hooks_t {
      * Setting any flag will configure an aborting hook
     */
     ecs_type_hooks_flags_t flags;
+
+    ecs_type_hooks_compare_flags_t compare_flags;
     
     /** Callback that is invoked when an instance of a component is added. This
      * callback is invoked before triggers are invoked. */

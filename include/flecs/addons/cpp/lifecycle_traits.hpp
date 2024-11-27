@@ -376,10 +376,24 @@ struct has_operator_greater<T, void_t<decltype(std::declval<const T&>() > std::d
 template <typename T, typename = void>
 struct has_operator_equal : std::false_type {};
 
+#if defined(__clang__)
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wfloat-equal"
+#elif defined(__GNUC__) && !defined(__clang__)
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wfloat-equal"
+#endif
+
 // Only enable if T has an operator== that takes T as the right-hand side (no implicit conversion)
 template <typename T>
 struct has_operator_equal<T, void_t<decltype(std::declval<const T&>() == std::declval<const T&>())>> : 
     std::is_same<decltype(std::declval<const T&>() == std::declval<const T&>()), bool> {};
+
+#if defined(__clang__)
+    #pragma clang diagnostic pop
+#elif defined(__GNUC__) && !defined(__clang__)
+    #pragma GCC diagnostic pop
+#endif
 
 // 1. Compare function if `<`, `>`, are defined
 template <typename T, if_t<

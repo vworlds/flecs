@@ -1462,6 +1462,10 @@ void ecs_set_hooks_id(
         ti->hooks.ctor_move_dtor = ecs_move_ctor_illegal;
     }
 
+    if(ti->hooks.comp == NULL) {
+        ti->hooks.comp = flecs_default_comp;
+    }
+
     ti->hooks.flags = flags;
 
 error:

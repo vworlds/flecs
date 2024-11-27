@@ -19226,6 +19226,10 @@ void ecs_set_hooks_id(
         ti->hooks.ctor_move_dtor = ecs_move_ctor_illegal;
     }
 
+    if(ti->hooks.comp == NULL) {
+        ti->hooks.comp = flecs_default_comp;
+    }
+
     ti->hooks.flags = flags;
 
 error:
@@ -50151,10 +50155,12 @@ int ecs_compare_id(
 
 
 int ecs_compare_string(
-    const void *str_a,
-    const void *str_b,
+    const void *a_ptr,
+    const void *b_ptr,
     const ecs_type_info_t *ti) {
     (void)ti;
+    const char* str_a = *((const char *const *) a_ptr);
+    const char* str_b = *((const char *const *) b_ptr);
     if(str_a == str_b) {
         return 0;
     }
@@ -50410,6 +50416,9 @@ int flecs_init_type(
         if (meta_type->existing) {
           if (!ti->hooks.ctor) {
             ti->hooks.ctor = flecs_default_ctor;
+          }
+          if (!ti->hooks.comp) {
+            ti->hooks.comp = flecs_default_comp;
           }
         } 
     } else {
